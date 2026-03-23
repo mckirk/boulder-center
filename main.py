@@ -2,6 +2,7 @@ import json
 import math
 from collections import defaultdict
 from pathlib import Path
+from typing import cast
 
 import folium
 import networkx as nx
@@ -183,7 +184,10 @@ def find_best_node(
     If directed=False:
       - G is assumed undirected
     """
-    search_graph = G.reverse(copy=False) if directed else G
+    if directed:
+        search_graph = cast(nx.MultiDiGraph, G).reverse(copy=False)
+    else:
+        search_graph = G
 
     sum_time = defaultdict(float)
     reach_count = defaultdict(int)
