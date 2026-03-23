@@ -107,6 +107,12 @@ Approx. address: ...
 - Reverse geocoding returns an approximate nearby address, not a guaranteed destination or venue.
 - If the directed bike graph cannot reach all halls, the script falls back to an undirected graph.
 
+## Correctness Guarantee
+
+There is no correctness guarantee.
+
+This project was built almost entirely by vibe-coding, so any result, assumption, route, travel-time estimate, or generated output may be wrong in ways that are subtle, obvious, or both. Treat it as an experiment, not a verified routing or optimization tool.
+
 ## Project Structure
 
 ```text
