@@ -1,0 +1,2 @@
+mode,speed_model,best_node,lat,lon,avg_bike_time_min,approx_address
+directed bike graph,grade-adjusted heuristic,8895430532,52.49908,13.417674,15.777868135145228,"Kottbusser Tor, Luisenstadt, Kreuzberg, Friedrichshain-Kreuzberg, Berlin, 10999, Deutschland"
