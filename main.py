@@ -293,6 +293,39 @@ def graph_has_edge_grades(G: nx.MultiDiGraph) -> bool:
     return all("grade" in data for _, _, _, data in G.edges(keys=True, data=True))
 
 
+def print_grade_diagnostics(G: nx.MultiDiGraph) -> None:
+    grade_values = [
+        float(data["grade"])
+        for _, _, _, data in G.edges(keys=True, data=True)
+        if "grade" in data and float(data.get("length", 0.0)) > 0
+    ]
+
+    if not grade_values:
+        print("[diag ] no edge grades available for diagnostics")
+        return
+
+    grade_series = pd.Series(grade_values, dtype="float64")
+    signed_quantiles = [0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99]
+    absolute_quantiles = [0.5, 0.75, 0.95, 0.99]
+    signed_percentiles = grade_series.quantile(signed_quantiles)
+    absolute_percentiles = grade_series.abs().quantile(absolute_quantiles)
+
+    signed_summary = ", ".join(
+        f"p{int(percentile * 100):02d}={float(signed_percentiles.loc[percentile]) * 100:.2f}%"
+        for percentile in signed_quantiles
+    )
+    absolute_summary = ", ".join(
+        f"p{int(percentile * 100):02d}={float(absolute_percentiles.loc[percentile]) * 100:.2f}%"
+        for percentile in absolute_quantiles
+    )
+
+    print(
+        f"[diag ] grade distribution across {len(grade_values)} edges: "
+        f"min={grade_series.min() * 100:.2f}%, max={grade_series.max() * 100:.2f}%, {signed_summary}"
+    )
+    print(f"[diag ] absolute grade percentiles: {absolute_summary}")
+
+
 def graph_matches_elevation_config(G: nx.MultiDiGraph, place: str) -> bool:
     return (
         G.graph.get("cache_place") == place
@@ -461,6 +494,10 @@ def main() -> None:
     print("2) Loading Berlin bike network...")
     G, speed_model = load_or_prepare_bike_graph(PLACE)
     G = add_bike_times(G, ASSUMED_BIKE_SPEED_KPH)
+    if graph_has_edge_grades(G):
+        print_grade_diagnostics(G)
+    else:
+        print("[diag ] grade diagnostics skipped because the graph has no computed edge grades")
 
     print("3) Snapping halls to nearest bike-network nodes...")
     hall_node_ids = ox.distance.nearest_nodes(
