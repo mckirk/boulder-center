@@ -65,9 +65,9 @@ python main.py
 
 ## Output Files
 
-The script writes results to `output/`:
+The script writes the GitHub Pages-ready HTML map to `docs/` and the CSV artifacts to `output/`:
 
-- `output/berlin_boulder_central_point.html`
+- `docs/index.html`
 - `output/berlin_boulder_halls_geocoded.csv`
 - `output/berlin_boulder_hall_travel_times_from_center.csv`
 - `output/berlin_boulder_central_point_summary.csv`
@@ -111,6 +111,7 @@ Approx. address: ...
 
 ```text
 .
+├── docs/            # generated GitHub Pages output
 ├── main.py
 ├── pyproject.toml
 ├── uv.lock

@@ -28,11 +28,12 @@ ELEVATION_GRID_STEP_DEGREES = 0.01
 MAX_ABS_GRADE = 0.12
 MIN_BIKE_SPEED_KPH = 8.0
 MAX_BIKE_SPEED_KPH = 40.0
-OUTPUT_DIR = Path("output")
-OUTPUT_MAP = OUTPUT_DIR / "berlin_boulder_central_point.html"
-OUTPUT_HALLS_CSV = OUTPUT_DIR / "berlin_boulder_halls_geocoded.csv"
-OUTPUT_TRAVEL_TIMES_CSV = OUTPUT_DIR / "berlin_boulder_hall_travel_times_from_center.csv"
-OUTPUT_SUMMARY_CSV = OUTPUT_DIR / "berlin_boulder_central_point_summary.csv"
+OUTPUT_MAP_DIR = Path("docs")
+OUTPUT_DATA_DIR = Path("output")
+OUTPUT_MAP = OUTPUT_MAP_DIR / "index.html"
+OUTPUT_HALLS_CSV = OUTPUT_DATA_DIR / "berlin_boulder_halls_geocoded.csv"
+OUTPUT_TRAVEL_TIMES_CSV = OUTPUT_DATA_DIR / "berlin_boulder_hall_travel_times_from_center.csv"
+OUTPUT_SUMMARY_CSV = OUTPUT_DATA_DIR / "berlin_boulder_central_point_summary.csv"
 
 CACHE_DIR = Path(".cache")
 GEOCODE_CACHE_FILE = CACHE_DIR / "geocode_cache.json"
@@ -59,8 +60,9 @@ def ensure_cache_dir() -> None:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def ensure_output_dir() -> None:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+def ensure_output_dirs() -> None:
+    OUTPUT_MAP_DIR.mkdir(parents=True, exist_ok=True)
+    OUTPUT_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def slugify_cache_token(value: str) -> str:
@@ -481,12 +483,12 @@ def save_map(df_halls: pd.DataFrame, center_lat: float, center_lon: float, outpu
         tooltip="Bike-time-optimal central point",
     ).add_to(m)
 
-    ensure_output_dir()
+    ensure_output_dirs()
     m.save(str(output_html))
 
 
 def main() -> None:
-    ensure_output_dir()
+    ensure_output_dirs()
 
     print("1) Geocoding boulder halls...")
     halls_df = geocode_halls(HALLS)
