@@ -4,6 +4,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 from typing import cast
+import re
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -36,8 +37,7 @@ OUTPUT_SUMMARY_CSV = OUTPUT_DIR / "berlin_boulder_central_point_summary.csv"
 CACHE_DIR = Path(".cache")
 GEOCODE_CACHE_FILE = CACHE_DIR / "geocode_cache.json"
 REVERSE_GEOCODE_CACHE_FILE = CACHE_DIR / "reverse_geocode_cache.json"
-GRAPH_CACHE_FILE = CACHE_DIR / "berlin_bike.graphml"
-ELEVATED_GRAPH_CACHE_FILE = CACHE_DIR / "berlin_bike_elevated.graphml"
+CACHE_VERSION = "v1"
 
 # Current Berlin bouldering halls / studios.
 HALLS = {
@@ -47,7 +47,7 @@ HALLS = {
     "Der Kegel": "Revaler Straße 99, 10245 Berlin, Germany",
     "Elektra": "Gustav-Meyer-Allee 25, 13355 Berlin, Germany",
     "Ostbloc": "Hauptstraße 13, 10317 Berlin, Germany",
-    # "Südbloc": "Großbeerenstraße 2-10, Haus 4, 12107 Berlin, Germany",
+    "Südbloc": "Großbeerenstraße 2-10, Haus 4, 12107 Berlin, Germany",
     "urban apes Basement Berlin": "Stresemannstraße 72, 10963 Berlin, Germany",
     "urban apes bright site Berlin": "Wilhelm-Kabus-Straße 40, 10829 Berlin, Germany",
     "urban apes Fhain Berlin": "Friedenstraße 91 B, 10249 Berlin, Germany",
@@ -63,10 +63,37 @@ def ensure_output_dir() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def slugify_cache_token(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "default"
+
+
+def get_graph_cache_file(place: str) -> Path:
+    return CACHE_DIR / f"{slugify_cache_token(place)}_bike.graphml"
+
+
+def get_elevated_graph_cache_file(place: str) -> Path:
+    config_token = "_".join(
+        [
+            slugify_cache_token(place),
+            CACHE_VERSION,
+            f"grid-{ELEVATION_GRID_STEP_DEGREES}",
+            f"batch-{ELEVATION_API_BATCH_SIZE}",
+            f"max-grade-{MAX_ABS_GRADE}",
+            f"min-speed-{MIN_BIKE_SPEED_KPH}",
+            f"max-speed-{MAX_BIKE_SPEED_KPH}",
+        ]
+    )
+    return CACHE_DIR / f"{config_token}_bike_elevated.graphml"
+
+
 def load_json_cache(path: Path) -> dict:
     if path.exists():
-        with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError) as exc:
+            print(f"[warn ] ignoring unreadable cache file {path}: {exc}")
     return {}
 
 
@@ -160,13 +187,15 @@ def load_or_download_bike_graph(place: str) -> nx.MultiDiGraph:
     This usually saves much more time than geocoding cache alone.
     """
     ensure_cache_dir()
-    if GRAPH_CACHE_FILE.exists():
-        print(f"[cache] loading graph: {GRAPH_CACHE_FILE}")
-        G = ox.load_graphml(GRAPH_CACHE_FILE)
+    graph_cache_file = get_graph_cache_file(place)
+    if graph_cache_file.exists():
+        print(f"[cache] loading graph: {graph_cache_file}")
+        G = ox.load_graphml(graph_cache_file)
     else:
         print(f"[live ] downloading graph for: {place}")
         G = ox.graph_from_place(place, network_type="bike", simplify=True, retain_all=False)
-        ox.save_graphml(G, GRAPH_CACHE_FILE)
+        G.graph["cache_place"] = place
+        ox.save_graphml(G, graph_cache_file)
     return G
 
 
@@ -239,6 +268,7 @@ def add_approximate_node_elevations(G: nx.MultiDiGraph) -> nx.MultiDiGraph:
         data["elevation"] = sampled_elevations[(lat_index, lon_index)]
 
     G.graph["elevation_model"] = "grid-approximation"
+    G.graph["elevation_grid_step_degrees"] = ELEVATION_GRID_STEP_DEGREES
     return G
 
 
@@ -263,18 +293,39 @@ def graph_has_edge_grades(G: nx.MultiDiGraph) -> bool:
     return all("grade" in data for _, _, _, data in G.edges(keys=True, data=True))
 
 
+def graph_matches_elevation_config(G: nx.MultiDiGraph, place: str) -> bool:
+    return (
+        G.graph.get("cache_place") == place
+        and str(G.graph.get("elevation_model")) == "grid-approximation"
+        and float(G.graph.get("elevation_grid_step_degrees", -1.0)) == ELEVATION_GRID_STEP_DEGREES
+    )
+
+
+class NoReachableCommonNodeError(RuntimeError):
+    pass
+
+
 def load_or_prepare_bike_graph(place: str) -> tuple[nx.MultiDiGraph, str]:
     """
     Load the bike graph from cache when possible and enrich it with elevations
     and grades when that optional data is available.
     """
     ensure_cache_dir()
+    elevated_graph_cache_file = get_elevated_graph_cache_file(place)
 
-    if ENABLE_ELEVATION_ADJUSTMENT and ELEVATED_GRAPH_CACHE_FILE.exists():
-        print(f"[cache] loading elevated graph: {ELEVATED_GRAPH_CACHE_FILE}")
-        return ox.load_graphml(ELEVATED_GRAPH_CACHE_FILE), "grade-adjusted heuristic"
+    if ENABLE_ELEVATION_ADJUSTMENT and elevated_graph_cache_file.exists():
+        print(f"[cache] loading elevated graph: {elevated_graph_cache_file}")
+        elevated_graph = ox.load_graphml(elevated_graph_cache_file)
+        if (
+            graph_has_node_elevations(elevated_graph)
+            and graph_has_edge_grades(elevated_graph)
+            and graph_matches_elevation_config(elevated_graph, place)
+        ):
+            return elevated_graph, "grade-adjusted heuristic"
+        print("[warn ] cached elevated graph is incomplete or stale, rebuilding it")
 
     G = load_or_download_bike_graph(place)
+    G.graph["cache_place"] = place
 
     if not ENABLE_ELEVATION_ADJUSTMENT:
         return G, "flat speed"
@@ -287,7 +338,7 @@ def load_or_prepare_bike_graph(place: str) -> tuple[nx.MultiDiGraph, str]:
             print("[calc ] computing approximate edge grades...")
             G = add_edge_grades_from_node_elevations(G)
 
-        ox.save_graphml(G, ELEVATED_GRAPH_CACHE_FILE)
+        ox.save_graphml(G, elevated_graph_cache_file)
         return G, "grade-adjusted heuristic"
     except Exception as exc:
         print(f"[warn ] elevation enrichment unavailable, using flat-speed fallback: {exc}")
@@ -359,7 +410,9 @@ def find_best_node(
     eligible_nodes = [n for n in G.nodes if reach_count[n] == required]
 
     if not eligible_nodes:
-        raise RuntimeError("No node can reach all halls with the current graph settings.")
+        raise NoReachableCommonNodeError(
+            "No node can reach all halls with the current graph settings."
+        )
 
     best_node = min(eligible_nodes, key=lambda n: sum_time[n] / required)
     best_avg_min = sum_time[best_node] / required
@@ -428,7 +481,7 @@ def main() -> None:
         )
         graph_used = G
         mode = "directed bike graph"
-    except RuntimeError:
+    except NoReachableCommonNodeError:
         UG = G.to_undirected(as_view=False)
         best_node, best_avg_min, hall_times = find_best_node(
             UG,
@@ -479,6 +532,9 @@ def main() -> None:
     print(f"Saved per-hall travel times to: {OUTPUT_TRAVEL_TIMES_CSV}")
     print(f"Saved summary to: {OUTPUT_SUMMARY_CSV}")
     print(f"Cache directory: {CACHE_DIR.resolve()}")
+    print(f"Bike graph cache: {get_graph_cache_file(PLACE)}")
+    if ENABLE_ELEVATION_ADJUSTMENT:
+        print(f"Elevated graph cache: {get_elevated_graph_cache_file(PLACE)}")
 
 
 if __name__ == "__main__":
